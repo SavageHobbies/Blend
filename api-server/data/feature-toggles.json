@@ -1,0 +1,11 @@
+[
+      { "id": "ai-demos", "label": "AI Demos", "enabled": true },
+      { "id": "recommendations", "label": "Recommendations", "enabled": true },
+      { "id": "ai-case-studies", "label": "AI Case Studies", "enabled": true },
+      { "id": "client-portal", "label": "Client Portal", "enabled": true },
+      { "id": "project-estimator", "label": "Project Estimator", "enabled": true },
+      { "id": "location-content", "label": "Location Content", "enabled": true },
+      { "id": "content-creation", "label": "Content Creation Tools", "enabled": true },
+      { "id": "virtual-tours", "label": "Virtual Tours", "enabled": true },
+      { "id": "analytics-dashboard", "label": "Analytics Dashboard", "enabled": true }
+    ]
