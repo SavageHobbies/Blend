@@ -2,8 +2,27 @@ const express = require('express');
 const cors = require('cors');
 const Parser = require('rss-parser');
 const { SignJWT, jwtVerify } = require('jose');
-const fs = require('fs').promises;
-const path = require('path');
+const fs = require('node:fs').promises;
+const path = require('node:path');
+
+async function readDataFile(filePath) {
+  try {
+    const data = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error(`Error reading data file at ${filePath}:`, error);
+    throw new Error(`Failed to read data file at ${filePath}`);
+  }
+}
+
+async function writeDataFile(filePath, data) {
+  try {
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error(`Error writing to data file at ${filePath}:`, error);
+    throw new Error(`Failed to write to data file at ${filePath}`);
+  }
+}
 
 const app = express();
 const parser = new Parser();
@@ -13,6 +32,52 @@ const rssFeedsPath = path.join(__dirname, 'data', 'rss-feeds.json');
 const servicesPath = path.join(__dirname, 'data', 'services.json');
 const specialOffersPath = path.join(__dirname, 'data', 'special-offers.json');
 const featureTogglesPath = path.join(__dirname, 'data', 'feature-toggles.json');
+
+async function handleCRUD(req, res, filePath, idField = 'id') {
+  try {
+    switch (req.method) {
+      case 'GET': {
+        const data = await readDataFile(filePath);
+        res.json(data);
+        break;
+      }
+      case 'POST': {
+        const newItem = req.body;
+        const data = await readDataFile(filePath);
+        data.push(newItem);
+        await writeDataFile(filePath, data);
+        res.status(201).json({ message: `${filePath.split('/').pop().replace('.json', '').slice(0, -1)} added successfully` });
+        break;
+      }
+      case 'PUT': {
+        const { id } = req.params;
+        const updatedItem = req.body;
+        const data = await readDataFile(filePath);
+        const updatedData = data.map((item) =>
+          item[idField] === id ? { ...item, ...updatedItem } : item
+        );
+        await writeDataFile(filePath, updatedData);
+        res.json({ message: `${filePath.split('/').pop().replace('.json', '').slice(0, -1)} updated successfully` });
+        break;
+      }
+      case 'DELETE': {
+        const { id } = req.params;
+        const data = await readDataFile(filePath);
+        const updatedData = data.filter((item, index) =>
+          idField === 'id' ? item[idField] !== id : index !== Number.parseInt(id)
+        );
+        await writeDataFile(filePath, updatedData);
+        res.json({ message: `${filePath.split('/').pop().replace('.json', '').slice(0, -1)} deleted successfully` });
+        break;
+      }
+      default:
+        res.status(405).json({ error: 'Method Not Allowed' });
+    }
+  } catch (error) {
+    console.error(`Error handling ${filePath.split('/').pop().replace('.json', '').slice(0, -1)}:`, error);
+    res.status(500).json({ error: `Failed to handle ${filePath.split('/').pop().replace('.json', '').slice(0, -1)}` });
+  }
+}
 
 // Specific CORS configuration for by1.net
 const ALLOWED_ORIGINS = [
@@ -96,9 +161,9 @@ app.get('/health', (req, res) => {
 app.post('/articles', async (req, res) => {
   try {
     const newArticle = req.body;
-    const articles = JSON.parse(await fs.readFile(articlesPath, 'utf-8'));
+    const articles = await readDataFile(articlesPath);
     articles.push(newArticle);
-    await fs.writeFile(articlesPath, JSON.stringify(articles, null, 2));
+    await writeDataFile(articlesPath, articles);
     res.status(201).json({ message: 'Article saved successfully' });
   } catch (error) {
     console.error('Error saving article:', error);
@@ -108,7 +173,7 @@ app.post('/articles', async (req, res) => {
 
 app.get('/articles', async (req, res) => {
   try {
-    const articles = JSON.parse(await fs.readFile(articlesPath, 'utf-8'));
+    const articles = await readDataFile(articlesPath);
     res.json(articles);
   } catch (error) {
     console.error('Error fetching articles:', error);
@@ -119,7 +184,7 @@ app.get('/articles', async (req, res) => {
 // RSS Feeds Management
 app.get('/rss-feeds', async (req, res) => {
   try {
-    const rssFeeds = JSON.parse(await fs.readFile(rssFeedsPath, 'utf-8'));
+    const rssFeeds = await readDataFile(rssFeedsPath);
     res.json(rssFeeds);
   } catch (error) {
     console.error('Error fetching RSS feeds:', error);
@@ -130,9 +195,9 @@ app.get('/rss-feeds', async (req, res) => {
 app.post('/rss-feeds', async (req, res) => {
   try {
     const newFeed = req.body;
-    const rssFeeds = JSON.parse(await fs.readFile(rssFeedsPath, 'utf-8'));
+    const rssFeeds = await readDataFile(rssFeedsPath);
     rssFeeds.push(newFeed);
-    await fs.writeFile(rssFeedsPath, JSON.stringify(rssFeeds, null, 2));
+    await writeDataFile(rssFeedsPath, rssFeeds);
     res.status(201).json({ message: 'RSS feed added successfully' });
   } catch (error) {
     console.error('Error adding RSS feed:', error);
@@ -143,9 +208,9 @@ app.post('/rss-feeds', async (req, res) => {
 app.delete('/rss-feeds/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const rssFeeds = JSON.parse(await fs.readFile(rssFeedsPath, 'utf-8'));
-    const updatedFeeds = rssFeeds.filter((feed, index) => index !== parseInt(id));
-    await fs.writeFile(rssFeedsPath, JSON.stringify(updatedFeeds, null, 2));
+    const rssFeeds = await readDataFile(rssFeedsPath);
+    const updatedFeeds = rssFeeds.filter((feed, index) => index !== Number.parseInt(id));
+    await writeDataFile(rssFeedsPath, updatedFeeds);
     res.json({ message: 'RSS feed deleted successfully' });
   } catch (error) {
     console.error('Error deleting RSS feed:', error);
@@ -156,7 +221,7 @@ app.delete('/rss-feeds/:id', async (req, res) => {
 // Services Management
 app.get('/services', async (req, res) => {
   try {
-    const services = JSON.parse(await fs.readFile(servicesPath, 'utf-8'));
+    const services = await readDataFile(servicesPath);
     res.json(services);
   } catch (error) {
     console.error('Error fetching services:', error);
@@ -167,9 +232,9 @@ app.get('/services', async (req, res) => {
 app.post('/services', async (req, res) => {
   try {
     const newService = req.body;
-    const services = JSON.parse(await fs.readFile(servicesPath, 'utf-8'));
+    const services = await readDataFile(servicesPath);
     services.push(newService);
-    await fs.writeFile(servicesPath, JSON.stringify(services, null, 2));
+    await writeDataFile(servicesPath, services);
     res.status(201).json({ message: 'Service added successfully' });
   } catch (error) {
     console.error('Error adding service:', error);
@@ -181,11 +246,11 @@ app.put('/services/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updatedService = req.body;
-    const services = JSON.parse(await fs.readFile(servicesPath, 'utf-8'));
+    const services = await readDataFile(servicesPath);
     const updatedServices = services.map((service, index) =>
-      index === parseInt(id) ? { ...service, ...updatedService } : service
+      index === Number.parseInt(id) ? { ...service, ...updatedService } : service
     );
-    await fs.writeFile(servicesPath, JSON.stringify(updatedServices, null, 2));
+    await writeDataFile(servicesPath, updatedServices);
     res.json({ message: 'Service updated successfully' });
   } catch (error) {
     console.error('Error updating service:', error);
@@ -196,9 +261,9 @@ app.put('/services/:id', async (req, res) => {
 app.delete('/services/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const services = JSON.parse(await fs.readFile(servicesPath, 'utf-8'));
-    const updatedServices = services.filter((service, index) => index !== parseInt(id));
-    await fs.writeFile(servicesPath, JSON.stringify(updatedServices, null, 2));
+    const services = await readDataFile(servicesPath);
+    const updatedServices = services.filter((service, index) => index !== Number.parseInt(id));
+    await writeDataFile(servicesPath, updatedServices);
     res.json({ message: 'Service deleted successfully' });
   } catch (error) {
     console.error('Error deleting service:', error);
@@ -209,7 +274,7 @@ app.delete('/services/:id', async (req, res) => {
 // Special Offers Management
 app.get('/special-offers', async (req, res) => {
   try {
-    const specialOffers = JSON.parse(await fs.readFile(specialOffersPath, 'utf-8'));
+    const specialOffers = await readDataFile(specialOffersPath);
     res.json(specialOffers);
   } catch (error) {
     console.error('Error fetching special offers:', error);
@@ -220,9 +285,9 @@ app.get('/special-offers', async (req, res) => {
 app.post('/special-offers', async (req, res) => {
   try {
     const newOffer = req.body;
-    const specialOffers = JSON.parse(await fs.readFile(specialOffersPath, 'utf-8'));
+    const specialOffers = await readDataFile(specialOffersPath);
     specialOffers.push(newOffer);
-    await fs.writeFile(specialOffersPath, JSON.stringify(specialOffers, null, 2));
+    await writeDataFile(specialOffersPath, specialOffers);
     res.status(201).json({ message: 'Special offer added successfully' });
   } catch (error) {
     console.error('Error adding special offer:', error);
@@ -234,11 +299,11 @@ app.put('/special-offers/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updatedOffer = req.body;
-    const specialOffers = JSON.parse(await fs.readFile(specialOffersPath, 'utf-8'));
+    const specialOffers = await readDataFile(specialOffersPath);
     const updatedOffers = specialOffers.map((offer, index) =>
-      index === parseInt(id) ? { ...offer, ...updatedOffer } : offer
+      index === Number.parseInt(id) ? { ...offer, ...updatedOffer } : offer
     );
-    await fs.writeFile(specialOffersPath, JSON.stringify(updatedOffers, null, 2));
+    await writeDataFile(specialOffersPath, updatedOffers);
     res.json({ message: 'Special offer updated successfully' });
   } catch (error) {
     console.error('Error updating special offer:', error);
@@ -249,9 +314,9 @@ app.put('/special-offers/:id', async (req, res) => {
 app.delete('/special-offers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const specialOffers = JSON.parse(await fs.readFile(specialOffersPath, 'utf-8'));
-    const updatedOffers = specialOffers.filter((offer, index) => index !== parseInt(id));
-    await fs.writeFile(specialOffersPath, JSON.stringify(updatedOffers, null, 2));
+    const specialOffers = await readDataFile(specialOffersPath);
+    const updatedOffers = specialOffers.filter((offer, index) => index !== Number.parseInt(id));
+    await writeDataFile(specialOffersPath, updatedOffers);
     res.json({ message: 'Special offer deleted successfully' });
   } catch (error) {
     console.error('Error deleting special offer:', error);
@@ -262,7 +327,7 @@ app.delete('/special-offers/:id', async (req, res) => {
 // Feature Toggles Management
 app.get('/feature-toggles', async (req, res) => {
   try {
-    const featureToggles = JSON.parse(await fs.readFile(featureTogglesPath, 'utf-8'));
+    const featureToggles = await readDataFile(featureTogglesPath);
     res.json(featureToggles);
   } catch (error) {
     console.error('Error fetching feature toggles:', error);
@@ -274,11 +339,11 @@ app.put('/feature-toggles/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updatedToggle = req.body;
-    const featureToggles = JSON.parse(await fs.readFile(featureTogglesPath, 'utf-8'));
-    const updatedToggles = featureToggles.map((toggle) =>
+    const featureToggles = await readDataFile(featureTogglesPath);
+     const updatedToggles = featureToggles.map((toggle) =>
       toggle.id === id ? { ...toggle, ...updatedToggle } : toggle
     );
-    await fs.writeFile(featureTogglesPath, JSON.stringify(updatedToggles, null, 2));
+    await writeDataFile(featureTogglesPath, updatedToggles);
     res.json({ message: 'Feature toggle updated successfully' });
   } catch (error) {
     console.error('Error updating feature toggle:', error);
